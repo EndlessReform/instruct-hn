@@ -1,1 +1,1 @@
-mod embedder;
+pub mod embedder;

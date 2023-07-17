@@ -4,10 +4,14 @@ pub mod triton;
 
 use crate::config::Config;
 use crate::hn_processor::embedder::E5Embedder;
+use axum::{
+    routing::get,
+    Router
+};
 
 use clap::Parser;
 use dotenv::dotenv;
-use log::{debug, error, info, warn};
+use log::{debug, info};
 
 #[derive(Parser, Debug)]
 #[clap(about = "Backend server for instruct-hn")]

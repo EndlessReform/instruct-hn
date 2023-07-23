@@ -40,8 +40,9 @@ async fn main() {
     debug!("Config loaded");
     let conn = &mut AsyncPgConnection::establish(&config.db_url).await.unwrap();
 
+    /*
     let results: Vec<Item> = items.filter(id.eq(30302618)).load(conn).await.unwrap();
-    println!("{:?}", results.len());
+    println!("{:?}", results.len()); */
 
     // let text: &str = "When I was a young boy, my father took me into the city to see a marching band";
 

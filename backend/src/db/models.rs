@@ -1,3 +1,5 @@
+use crate::firebase_listener::listener;
+
 use super::schema::items;
 use diesel::dsl::{delete, insert_into};
 use diesel::pg::PgConnection;
@@ -32,4 +34,25 @@ impl Item {
     }
 
     // Add additional methods for querying the items table...
+}
+
+impl From<listener::Item> for Item {
+    fn from(fb_item: listener::Item) -> Self {
+        Self {
+            id: fb_item.id,
+            deleted: fb_item.deleted,
+            type_: fb_item.type_,
+            by: fb_item.by,
+            time: fb_item.time,
+            text: fb_item.text,
+            dead: fb_item.dead,
+            parent: fb_item.parent,
+            poll: fb_item.poll,
+            url: fb_item.url,
+            score: fb_item.score,
+            title: fb_item.title,
+            parts: fb_item.parts,
+            descendants: fb_item.descendants,
+        }
+    }
 }

@@ -185,6 +185,7 @@ dependencies = [
  "prost",
  "serde",
  "serde_json",
+ "thiserror",
  "tokenizers",
  "tokio",
  "tonic",
@@ -529,6 +530,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "deadpool"
+version = "0.9.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "421fe0f90f2ab22016f32a9881be5134fdd71c65298917084b0c7477cbc3856e"
+dependencies = [
+ "async-trait",
+ "deadpool-runtime",
+ "num_cpus",
+ "retain_mut",
+ "tokio",
+]
+
+[[package]]
+name = "deadpool-runtime"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "eaa37046cc0f6c3cc6090fbdbf73ef0b8ef4cfcc37f6befc0020f63e8cf121e1"
+
+[[package]]
 name = "derive_builder"
 version = "0.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -579,6 +599,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a40df24b390b2437af8b934b39acd277c246a08004afb91b8ccbe3137ffd4edc"
 dependencies = [
  "async-trait",
+ "deadpool",
  "diesel",
  "futures-util",
  "scoped-futures",
@@ -2006,6 +2027,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "retain_mut"
+version = "0.1.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4389f1d5789befaf6029ebd9f7dac4af7f7e3d61b69d4f30e2ac02b57e7712b0"
+
+[[package]]
 name = "ring"
 version = "0.16.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2377,18 +2404,18 @@ dependencies = [
 
 [[package]]
 name = "thiserror"
-version = "1.0.43"
+version = "1.0.44"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a35fc5b8971143ca348fa6df4f024d4d55264f3468c71ad1c2f365b0a4d58c42"
+checksum = "611040a08a0439f8248d1990b111c95baa9c704c805fa1f62104b39655fd7f90"
 dependencies = [
  "thiserror-impl",
 ]
 
 [[package]]
 name = "thiserror-impl"
-version = "1.0.43"
+version = "1.0.44"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "463fe12d7993d3b327787537ce8dd4dfa058de32fc2b195ef3cde03dc4771e8f"
+checksum = "090198534930841fab3a5d1bb637cde49e339654e606195f8d9c76eeb081dc96"
 dependencies = [
  "proc-macro2",
  "quote",

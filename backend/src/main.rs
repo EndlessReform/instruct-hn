@@ -8,6 +8,7 @@ pub mod triton;
 use crate::config::Config;
 use crate::db::models::Item;
 use crate::firebase_listener::FirebaseListener;
+use crate::sync_service::SyncService;
 // use crate::hn_processor::embedder::E5Embedder;
 use axum::{routing::get, Router};
 
@@ -46,17 +47,23 @@ async fn main() {
 
     let fb = FirebaseListener::new(&config.hn_api_url).unwrap();
     println!("{:?}", fb.get_max_id().await);
-    let config =
+    let pool_config =
         AsyncDieselConnectionManager::<diesel_async::AsyncPgConnection>::new(&config.db_url);
-    let pool = Pool::builder(config)
+    let pool = Pool::builder(pool_config)
         .build()
         .expect("Could not establish connection!");
 
     // Temporary
+    let sync_service = SyncService::new(config.hn_api_url.into(), pool.clone(), 1);
     let mut conn = pool.get().await.unwrap();
     //let results: Vec<Item> = items.filter(id.eq(30302618)).load(&mut conn).await.unwrap();
     let max_db_item: Option<i64> = items.select(max(id)).first(&mut conn).await.unwrap();
-    println!("{:?}", max_db_item);
+    println!("Latest DB item: {:?}", max_db_item);
+    let mut conn2 = pool.get().await.unwrap();
+    sync_service
+        .worker(30000000, 30000010, conn2)
+        .await
+        .unwrap();
 
     // let text: &str = "When I was a young boy, my father took me into the city to see a marching band";
 

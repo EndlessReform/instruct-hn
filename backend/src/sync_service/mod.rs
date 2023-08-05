@@ -1,5 +1,6 @@
 use diesel::insert_into;
 use diesel::prelude::*;
+use diesel::result::Error as DieselError;
 use diesel_async::pooled_connection::deadpool::Object;
 use diesel_async::pooled_connection::deadpool::Pool;
 use diesel_async::AsyncPgConnection;
@@ -11,12 +12,15 @@ use crate::db::schema::items::dsl::items;
 use crate::firebase_listener::{FirebaseListener, FirebaseListenerErr};
 
 #[derive(Error, Debug)]
-pub enum SyncServiceError {
+pub enum Error {
     #[error("Connection error: {0}")]
     ConnectError(String),
 
     #[error(transparent)]
-    FirebaseErr(#[from] FirebaseListenerErr),
+    FirebaseError(#[from] FirebaseListenerErr),
+
+    #[error(transparent)]
+    DieselError(#[from] DieselError),
 }
 
 pub struct SyncService {
@@ -43,21 +47,25 @@ impl SyncService {
         min_id: i64,
         max_id: i64,
         mut conn: Object<AsyncPgConnection>,
-    ) -> Result<(), SyncServiceError> {
+    ) -> Result<(), Error> {
         let fb = FirebaseListener::new(&self.firebase_url)
-            .map_err(|_| SyncServiceError::ConnectError("HALP".into()))?;
+            .map_err(|_| Error::ConnectError("HALP".into()))?;
         for i in min_id..max_id {
             let raw_item = fb.get_item(i).await?;
+            let item = Into::<models::Item>::into(raw_item);
+            println!("Uploading {}", i);
             insert_into(items)
-                .values(Into::<models::Item>::into(raw_item))
+                .values(&item)
+                .on_conflict(crate::db::schema::items::id)
+                .do_update()
+                .set(&item)
                 .execute(&mut conn)
-                .await
-                .expect("FRICK");
+                .await?;
         }
         Ok(())
     }
 
-    pub async fn fetch_all_data(&self) -> Result<(), SyncServiceError> {
+    pub async fn fetch_all_data(&self) -> Result<(), Error> {
         Ok(())
     }
 }

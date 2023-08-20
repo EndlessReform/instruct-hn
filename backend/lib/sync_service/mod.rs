@@ -8,8 +8,10 @@ use diesel_async::AsyncPgConnection;
 use diesel_async::RunQueryDsl;
 use futures::future::join_all;
 use log::{debug, info};
+use std::time::Duration;
 use std::vec;
 use thiserror::Error;
+use tokio::time::sleep;
 
 use crate::db::models;
 use crate::db::schema::items::dsl::*;
@@ -52,20 +54,26 @@ impl SyncService {
         max_id: i64,
         pool: Pool<diesel_async::AsyncPgConnection>,
     ) -> Result<(), Error> {
+        const FLUSH_INTERVAL: usize = 100;
         let mut conn = pool.get().await.unwrap();
         let fb = FirebaseListener::new(&self.firebase_url)
             .map_err(|_| Error::ConnectError("HALP".into()))?;
-        for i in min_id..max_id {
+
+        let mut batch: Vec<models::Item> = Vec::new();
+        for i in min_id..=max_id {
             let raw_item = fb.get_item(i).await?;
             let item = Into::<models::Item>::into(raw_item);
-            info!("Uploading {}", i);
-            insert_into(items)
-                .values(&item)
-                .on_conflict(crate::db::schema::items::id)
-                .do_update()
-                .set(&item)
-                .execute(&mut conn)
-                .await?;
+            batch.push(item);
+
+            if batch.len() == FLUSH_INTERVAL || i == max_id {
+                info!("Pushing {} to {}", (i - batch.len() as i64), i);
+                insert_into(items)
+                    .values(&batch)
+                    .on_conflict_do_nothing()
+                    .execute(&mut conn)
+                    .await?;
+                batch.clear();
+            }
         }
         Ok(())
     }
@@ -77,7 +85,7 @@ impl SyncService {
             return vec![];
         } else if max_id - min_id <= coerced_nworkers {
             // Potentially can't saturate workers, so give as many as possible an ID
-            return (min_id..max_id).map(|i| (i, i)).collect();
+            return (min_id..=max_id).map(|i| (i, i)).collect();
         } else {
             let num_ids_per_worker = (max_id - min_id) / coerced_nworkers;
 
@@ -131,6 +139,7 @@ impl SyncService {
             match result {
                 Ok(_) => {
                     // Handle success case
+                    log::debug!("Worker handled successfully!");
                 }
                 Err(err) => {
                     // Handle error case

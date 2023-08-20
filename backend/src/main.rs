@@ -46,7 +46,7 @@ async fn main() {
         .expect("Could not establish connection!");
 
     // Temporary
-    let sync_service = SyncService::new(config.hn_api_url, pool.clone(), 100);
+    let sync_service = SyncService::new(config.hn_api_url, pool.clone(), 500);
     /*
     let mut conn = pool.get().await.unwrap();
     //let results: Vec<Item> = items.filter(id.eq(30302618)).load(&mut conn).await.unwrap();

@@ -2,16 +2,13 @@ use diesel::dsl::max;
 use diesel::insert_into;
 use diesel::prelude::*;
 use diesel::result::Error as DieselError;
-use diesel_async::pooled_connection::deadpool::Object;
 use diesel_async::pooled_connection::deadpool::Pool;
-use diesel_async::AsyncPgConnection;
 use diesel_async::RunQueryDsl;
 use futures::future::join_all;
 use log::{debug, info};
-use std::time::Duration;
 use std::vec;
 use thiserror::Error;
-use tokio::time::sleep;
+use tokio::task::spawn;
 
 use crate::db::models;
 use crate::db::schema::items::dsl::*;
@@ -46,36 +43,6 @@ impl SyncService {
             num_workers,
             firebase_url,
         }
-    }
-
-    pub async fn worker(
-        &self,
-        min_id: i64,
-        max_id: i64,
-        pool: Pool<diesel_async::AsyncPgConnection>,
-    ) -> Result<(), Error> {
-        const FLUSH_INTERVAL: usize = 100;
-        let mut conn = pool.get().await.unwrap();
-        let fb = FirebaseListener::new(&self.firebase_url)
-            .map_err(|_| Error::ConnectError("HALP".into()))?;
-
-        let mut batch: Vec<models::Item> = Vec::new();
-        for i in min_id..=max_id {
-            let raw_item = fb.get_item(i).await?;
-            let item = Into::<models::Item>::into(raw_item);
-            batch.push(item);
-
-            if batch.len() == FLUSH_INTERVAL || i == max_id {
-                info!("Pushing {} to {}", (i - batch.len() as i64), i);
-                insert_into(items)
-                    .values(&batch)
-                    .on_conflict_do_nothing()
-                    .execute(&mut conn)
-                    .await?;
-                batch.clear();
-            }
-        }
-        Ok(())
     }
 
     /// `divide_ranges` somewhat fairly distributes the catchup range among workers
@@ -117,7 +84,7 @@ impl SyncService {
             .await
             .map_err(|_| Error::ConnectError("Listener could not access db pool!".into()))?;
 
-        let max_db_item: Option<i64> = items.select(max(id)).first(&mut conn).await?;
+        let max_db_item: Option<i64> = Some(35910000); // items.select(max(id)).first(&mut conn).await?;
         println!("Current max item: {:?}", max_db_item);
         let id_ranges = self.divide_ranges(
             max_db_item.ok_or(Error::ConnectError(
@@ -129,12 +96,23 @@ impl SyncService {
             },
         );
 
-        let workers: Vec<_> = id_ranges
-            .iter()
-            .map(|range| self.worker(range.0, range.1, self.db_pool.clone()))
-            .collect();
+        let mut handles = Vec::new();
+        for range in id_ranges.into_iter() {
+            let db_pool = self.db_pool.clone();
+            let fb_url = self.firebase_url.clone();
+            let handle = spawn(async move { worker(&fb_url, range.0, range.1, db_pool).await });
+            handles.push(handle);
+        }
 
-        let results = join_all(workers).await;
+        let results = join_all(handles).await;
+        /*
+               let workers: Vec<_> = id_ranges
+                   .iter()
+                   .map(|range| self.worker(range.0, range.1, self.db_pool.clone()))
+                   .collect();
+
+               let results = join_all(workers).await;
+        */
         for result in results {
             match result {
                 Ok(_) => {
@@ -149,4 +127,33 @@ impl SyncService {
         }
         Ok(())
     }
+}
+
+pub async fn worker(
+    firebase_url: &str,
+    min_id: i64,
+    max_id: i64,
+    pool: Pool<diesel_async::AsyncPgConnection>,
+) -> Result<(), Error> {
+    const FLUSH_INTERVAL: usize = 100;
+    let mut conn = pool.get().await.unwrap();
+    let fb = FirebaseListener::new(firebase_url).map_err(|_| Error::ConnectError("HALP".into()))?;
+
+    let mut batch: Vec<models::Item> = Vec::new();
+    for i in min_id..=max_id {
+        let raw_item = fb.get_item(i).await?;
+        let item = Into::<models::Item>::into(raw_item);
+        batch.push(item);
+
+        if batch.len() == FLUSH_INTERVAL || i == max_id {
+            info!("Pushing {} to {}", (i - batch.len() as i64), i);
+            insert_into(items)
+                .values(&batch)
+                .on_conflict_do_nothing()
+                .execute(&mut conn)
+                .await?;
+            batch.clear();
+        }
+    }
+    Ok(())
 }

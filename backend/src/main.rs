@@ -54,7 +54,8 @@ async fn main() {
         .expect("Could not establish connection!");
 
     // Temporary
-    let sync_service = SyncService::new(config.hn_api_url.into(), pool.clone(), 1);
+    let sync_service = SyncService::new(config.hn_api_url.into(), pool.clone(), 20);
+    /*
     let mut conn = pool.get().await.unwrap();
     //let results: Vec<Item> = items.filter(id.eq(30302618)).load(&mut conn).await.unwrap();
     let max_db_item: Option<i64> = items.select(max(id)).first(&mut conn).await.unwrap();
@@ -64,7 +65,8 @@ async fn main() {
         .worker(30000000, 30000010, conn2)
         .await
         .unwrap();
-
+    */
+    sync_service.fetch_all_data().await.expect("Catchup failed");
     // let text: &str = "When I was a young boy, my father took me into the city to see a marching band";
 
     /*

@@ -6,6 +6,8 @@ use diesel_async::pooled_connection::deadpool::Object;
 use diesel_async::pooled_connection::deadpool::Pool;
 use diesel_async::AsyncPgConnection;
 use diesel_async::RunQueryDsl;
+use futures::future::join_all;
+use log::{debug, info};
 use std::vec;
 use thiserror::Error;
 
@@ -48,14 +50,15 @@ impl SyncService {
         &self,
         min_id: i64,
         max_id: i64,
-        mut conn: Object<AsyncPgConnection>,
+        pool: Pool<diesel_async::AsyncPgConnection>,
     ) -> Result<(), Error> {
+        let mut conn = pool.get().await.unwrap();
         let fb = FirebaseListener::new(&self.firebase_url)
             .map_err(|_| Error::ConnectError("HALP".into()))?;
         for i in min_id..max_id {
             let raw_item = fb.get_item(i).await?;
             let item = Into::<models::Item>::into(raw_item);
-            println!("Uploading {}", i);
+            info!("Uploading {}", i);
             insert_into(items)
                 .values(&item)
                 .on_conflict(crate::db::schema::items::id)
@@ -96,7 +99,7 @@ impl SyncService {
         }
     }
 
-    pub async fn fetch_all_data(&self) -> Result<(), Error> {
+    pub async fn fetch_all_data(&self, n_additional: Option<i64>) -> Result<(), Error> {
         let fb = FirebaseListener::new(&self.firebase_url)?;
         let max_fb_id = fb.get_max_id().await?;
 
@@ -107,13 +110,34 @@ impl SyncService {
             .map_err(|_| Error::ConnectError("Listener could not access db pool!".into()))?;
 
         let max_db_item: Option<i64> = items.select(max(id)).first(&mut conn).await?;
+        println!("Current max item: {:?}", max_db_item);
         let id_ranges = self.divide_ranges(
             max_db_item.ok_or(Error::ConnectError(
                 "Cannot find max DB item in Postgres!".into(),
             ))?,
-            max_fb_id,
+            match n_additional {
+                Some(n) => max_db_item.unwrap() + n,
+                None => max_fb_id,
+            },
         );
-        println!("Draft range: {:?}", id_ranges);
+
+        let workers: Vec<_> = id_ranges
+            .iter()
+            .map(|range| self.worker(range.0, range.1, self.db_pool.clone()))
+            .collect();
+
+        let results = join_all(workers).await;
+        for result in results {
+            match result {
+                Ok(_) => {
+                    // Handle success case
+                }
+                Err(err) => {
+                    // Handle error case
+                    log::error!("An error occurred in a worker: {:?}", err);
+                }
+            }
+        }
         Ok(())
     }
 }

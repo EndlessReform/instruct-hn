@@ -1,16 +1,8 @@
-pub mod config;
-pub mod db;
-pub mod firebase_listener;
-pub mod hn_processor;
-pub mod sync_service;
-pub mod triton;
-
-use crate::config::Config;
-use crate::db::models::Item;
-use crate::firebase_listener::FirebaseListener;
-use crate::sync_service::SyncService;
-// use crate::hn_processor::embedder::E5Embedder;
 use axum::{routing::get, Router};
+use backend_lib::{
+    config::Config, db, firebase_listener::FirebaseListener, sync_service::SyncService,
+};
+use std::time::Instant;
 
 use clap::Parser;
 use diesel::dsl::max;
@@ -54,7 +46,7 @@ async fn main() {
         .expect("Could not establish connection!");
 
     // Temporary
-    let sync_service = SyncService::new(config.hn_api_url.into(), pool.clone(), 20);
+    let sync_service = SyncService::new(config.hn_api_url, pool.clone(), 100);
     /*
     let mut conn = pool.get().await.unwrap();
     //let results: Vec<Item> = items.filter(id.eq(30302618)).load(&mut conn).await.unwrap();
@@ -66,7 +58,14 @@ async fn main() {
         .await
         .unwrap();
     */
-    sync_service.fetch_all_data().await.expect("Catchup failed");
+
+    let start_time = Instant::now();
+    sync_service
+        .fetch_all_data(Some(10000))
+        .await
+        .expect("Catchup failed");
+    let elapsed_time = start_time.elapsed();
+    println!("Time taken: {:?}", elapsed_time);
     // let text: &str = "When I was a young boy, my father took me into the city to see a marching band";
 
     /*

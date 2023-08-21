@@ -47,25 +47,14 @@ async fn main() {
 
     // Temporary
     let sync_service = SyncService::new(config.hn_api_url, pool.clone(), 200);
-    /*
-    let mut conn = pool.get().await.unwrap();
-    //let results: Vec<Item> = items.filter(id.eq(30302618)).load(&mut conn).await.unwrap();
-    let max_db_item: Option<i64> = items.select(max(id)).first(&mut conn).await.unwrap();
-    println!("Latest DB item: {:?}", max_db_item);
-    let mut conn2 = pool.get().await.unwrap();
-    sync_service
-        .worker(30000000, 30000010, conn2)
-        .await
-        .unwrap();
-    */
 
     let start_time = Instant::now();
     sync_service
-        .fetch_all_data(Some(10000))
+        .fetch_all_data(None)
         .await
         .expect("Catchup failed");
     let elapsed_time = start_time.elapsed();
-    println!("Time taken: {:?}", elapsed_time);
+    info!("Catchup time elapsed: {:?}", elapsed_time);
     // let text: &str = "When I was a young boy, my father took me into the city to see a marching band";
 
     /*

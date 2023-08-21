@@ -84,17 +84,19 @@ impl SyncService {
             .await
             .map_err(|_| Error::ConnectError("Listener could not access db pool!".into()))?;
 
-        let max_db_item: Option<i64> = Some(35950000); // items.select(max(id)).first(&mut conn).await?;
-        println!("Current max item: {:?}", max_db_item);
+        let max_db_item: Option<i64> = items.select(max(id)).first(&mut conn).await?;
+        let max_db_item = max_db_item.ok_or(Error::ConnectError(
+            "Cannot find max DB item in Postgres!".into(),
+        ))?;
+        info!("Current max item in db: {:?}", max_db_item);
         let id_ranges = self.divide_ranges(
-            max_db_item.ok_or(Error::ConnectError(
-                "Cannot find max DB item in Postgres!".into(),
-            ))?,
+            max_db_item,
             match n_additional {
-                Some(n) => max_db_item.unwrap() + n,
+                Some(n) => max_db_item + n,
                 None => max_fb_id,
             },
         );
+        info!("Items to download: {}", max_fb_id - max_db_item);
 
         let mut handles = Vec::new();
         for range in id_ranges.into_iter() {
@@ -105,14 +107,6 @@ impl SyncService {
         }
 
         let results = join_all(handles).await;
-        /*
-               let workers: Vec<_> = id_ranges
-                   .iter()
-                   .map(|range| self.worker(range.0, range.1, self.db_pool.clone()))
-                   .collect();
-
-               let results = join_all(workers).await;
-        */
         for result in results {
             match result {
                 Ok(_) => {
@@ -135,7 +129,7 @@ pub async fn worker(
     max_id: i64,
     pool: Pool<diesel_async::AsyncPgConnection>,
 ) -> Result<(), Error> {
-    const FLUSH_INTERVAL: usize = 100;
+    const FLUSH_INTERVAL: usize = 1000;
     let mut conn = pool.get().await.unwrap();
     let fb = FirebaseListener::new(firebase_url).map_err(|_| Error::ConnectError("HALP".into()))?;
 
@@ -146,7 +140,7 @@ pub async fn worker(
         batch.push(item);
 
         if batch.len() == FLUSH_INTERVAL || i == max_id {
-            info!("Pushing {} to {}", (i - batch.len() as i64), i);
+            debug!("Pushing {} to {}", (i - batch.len() as i64), i);
             insert_into(items)
                 .values(&batch)
                 .on_conflict_do_nothing()

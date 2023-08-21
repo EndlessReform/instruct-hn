@@ -1,7 +1,7 @@
 use firebase_rs::Firebase;
 use reqwest;
 use serde::{Deserialize, Serialize};
-use std::fmt::{self, format};
+use std::fmt::{self};
 use thiserror::Error;
 
 pub struct FirebaseListener {

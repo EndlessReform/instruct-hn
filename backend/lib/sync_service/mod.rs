@@ -84,7 +84,7 @@ impl SyncService {
             .await
             .map_err(|_| Error::ConnectError("Listener could not access db pool!".into()))?;
 
-        let max_db_item: Option<i64> = Some(35910000); // items.select(max(id)).first(&mut conn).await?;
+        let max_db_item: Option<i64> = Some(35950000); // items.select(max(id)).first(&mut conn).await?;
         println!("Current max item: {:?}", max_db_item);
         let id_ranges = self.divide_ranges(
             max_db_item.ok_or(Error::ConnectError(

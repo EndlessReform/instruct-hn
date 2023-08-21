@@ -46,7 +46,7 @@ async fn main() {
         .expect("Could not establish connection!");
 
     // Temporary
-    let sync_service = SyncService::new(config.hn_api_url, pool.clone(), 500);
+    let sync_service = SyncService::new(config.hn_api_url, pool.clone(), 200);
     /*
     let mut conn = pool.get().await.unwrap();
     //let results: Vec<Item> = items.filter(id.eq(30302618)).load(&mut conn).await.unwrap();
@@ -76,10 +76,11 @@ async fn main() {
     debug!("Embedder initialized");
     let embedding = embedder.encode(text).await.expect("Embedding failed!");
     println!("{:?}", embedding); */
+    /*
     let app = Router::new().route("/", get(|| async { "Hello, world!" }));
 
     axum::Server::bind(&"0.0.0.0:3000".parse().unwrap())
         .serve(app.into_make_service())
         .await
-        .unwrap();
+        .unwrap(); */
 }

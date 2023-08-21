@@ -1,11 +1,14 @@
 use firebase_rs::Firebase;
+use reqwest;
 use serde::{Deserialize, Serialize};
-use std::fmt;
+use std::fmt::{self, format};
 use thiserror::Error;
 
 pub struct FirebaseListener {
     /// TODO: Make this a connection pool if it becomes a bottleneck!
     firebase: Firebase,
+    client: reqwest::Client,
+    base_url: String,
 }
 
 #[derive(Deserialize, Serialize, Debug)]
@@ -56,20 +59,32 @@ impl FirebaseListener {
         let firebase = Firebase::new(url).map_err(|_| {
             FirebaseListenerErr::ConnectError(format!("Could not connect to URL {}", url))
         })?;
-        Ok(Self { firebase })
+        let client = reqwest::Client::new();
+        Ok(Self {
+            firebase,
+            client,
+            base_url: url.to_string(),
+        })
     }
 
     pub async fn get_item(&self, item_id: i64) -> Result<Item, FirebaseListenerErr> {
-        let item = self
-            .firebase
-            .at("item")
-            .at(&item_id.to_string())
-            .get::<Item>()
+        let url = format!("{}/item/{}.json", self.base_url, item_id);
+        let response = self.client.get(&url).send().await.map_err(|_| {
+            FirebaseListenerErr::ConnectError(format!("Could not connect to {}", url))
+        })?;
+
+        if !response.status().is_success() {
+            return Err(FirebaseListenerErr::ConnectError(format!(
+                "Received unexpected status code for item {}: {}",
+                item_id,
+                response.status()
+            )));
+        }
+
+        response
+            .json::<Item>()
             .await
-            .map_err(|_| {
-                FirebaseListenerErr::ParseError(format!("Could not parse item {}", item_id))
-            })?;
-        Ok(item)
+            .map_err(|_| FirebaseListenerErr::ParseError(format!("Item {} is not valid!", item_id)))
     }
 
     pub async fn get_user(&self, username: &str) -> Result<User, FirebaseListenerErr> {

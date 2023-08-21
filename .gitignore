@@ -1,3 +1,9 @@
 node_modules
 hn-sqlite-2023*
 __pycache__
+
+# Secrets
+.env
+
+# Generated files
+target

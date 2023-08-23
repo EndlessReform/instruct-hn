@@ -49,7 +49,7 @@ impl SyncService {
     fn divide_ranges(&self, min_id: i64, max_id: i64) -> Vec<(i64, i64)> {
         let coerced_nworkers: i64 = self.num_workers as i64;
         if min_id >= max_id {
-            return vec![];
+            vec![]
         } else if max_id - min_id <= coerced_nworkers {
             // Potentially can't saturate workers, so give as many as possible an ID
             return (min_id..=max_id).map(|i| (i, i)).collect();
@@ -75,7 +75,7 @@ impl SyncService {
     }
 
     pub async fn fetch_all_data(&self, n_additional: Option<i64>) -> Result<(), Error> {
-        let fb = FirebaseListener::new(&self.firebase_url)?;
+        let fb = FirebaseListener::new(self.firebase_url.clone())?;
         let max_fb_id = fb.get_max_id().await?;
 
         let mut conn = self
@@ -121,6 +121,11 @@ impl SyncService {
         }
         Ok(())
     }
+
+    /// Realtime subscription to HN item updates
+    pub async fn realtime_update(&self) -> Result<(), Error> {
+        Ok(())
+    }
 }
 
 pub async fn worker(
@@ -131,7 +136,8 @@ pub async fn worker(
 ) -> Result<(), Error> {
     const FLUSH_INTERVAL: usize = 1000;
     let mut conn = pool.get().await.unwrap();
-    let fb = FirebaseListener::new(firebase_url).map_err(|_| Error::ConnectError("HALP".into()))?;
+    let fb = FirebaseListener::new(firebase_url.to_string())
+        .map_err(|_| Error::ConnectError("HALP".into()))?;
 
     let mut batch: Vec<models::Item> = Vec::new();
     for i in min_id..=max_id {

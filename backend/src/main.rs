@@ -1,29 +1,34 @@
-use axum::{routing::get, Router};
-use backend_lib::{
-    config::Config, db, firebase_listener::FirebaseListener, sync_service::SyncService,
-};
+//use axum::{routing::get, Router};
+use backend_lib::{config::Config, firebase_listener::FirebaseListener, sync_service::SyncService};
+use flume;
 use std::time::Instant;
-use tokio::sync::mpsc;
 
 use clap::Parser;
-use diesel::dsl::max;
-use diesel::prelude::*;
 use diesel_async::pooled_connection::deadpool::Pool;
 use diesel_async::pooled_connection::AsyncDieselConnectionManager;
-use diesel_async::RunQueryDsl;
 use dotenv::dotenv;
 use log::{debug, info};
+use tokio::signal::unix::{signal, SignalKind};
+use tokio_util::sync::CancellationToken;
 
 #[derive(Parser, Debug)]
 #[clap(about = "Backend server for instruct-hn")]
 struct Cli {
     #[clap(short, long)]
-    /// Catch up on previous data
-    catchup: Option<bool>,
+    /// Disable catchup on previous data
+    no_catchup: bool,
 
     #[clap(short, long)]
     /// Listen for HN updates and persist them to DB
-    realtime: Option<bool>,
+    realtime: bool,
+
+    #[clap(long)]
+    /// Start catch-up from this ID
+    catchup_start: Option<i64>,
+
+    #[clap(long)]
+    /// Max number of records to catch up
+    catchup_amt: Option<i64>,
 }
 
 #[tokio::main]
@@ -33,7 +38,7 @@ async fn main() {
 
     let config = Config::from_env().expect("Config incorrectly specified");
     env_logger::init();
-    // let args = Cli::parse();
+    let args = Cli::parse();
     debug!("Config loaded");
 
     let pool_config =
@@ -42,37 +47,43 @@ async fn main() {
         .build()
         .expect("Could not establish connection!");
 
-    // Temporary
+    let shutdown_token = CancellationToken::new();
+    // TODO profile this constant
     let sync_service = SyncService::new(config.hn_api_url.clone(), pool.clone(), 200);
+    if !args.no_catchup {
+        let start_time = Instant::now();
+        info!("Beginning catchup");
+        sync_service
+            .catchup(args.catchup_amt, args.catchup_start)
+            .await
+            .expect("Catchup failed");
+        let elapsed_time = start_time.elapsed();
+        info!("Catchup time elapsed: {:?}", elapsed_time);
+    } else {
+        info!("Skipping catchup");
+    }
 
-    let start_time = Instant::now();
-    sync_service
-        .catchup(None, None)
-        .await
-        .expect("Catchup failed");
-    let elapsed_time = start_time.elapsed();
-    info!("Catchup time elapsed: {:?}", elapsed_time);
-    let (sender, receiver) = mpsc::channel(32);
+    let (sender, receiver) = flume::unbounded::<i64>();
+    let listener_cancel_token = shutdown_token.clone();
     let hn_updates_handle = tokio::spawn(async move {
         FirebaseListener::new(config.hn_api_url.clone())
             .unwrap()
-            .listen_to_updates(sender)
+            .listen_to_updates(sender, listener_cancel_token)
             .await
-            .expect("SSE has failed!");
+            .expect("HN update producer has failed!");
     });
-    hn_updates_handle
-        .await
-        .expect("SSE background update has panicked!");
-    // let text: &str = "When I was a young boy, my father took me into the city to see a marching band";
-    /* let (sender, mut receiver) = mpsc::channel(32);
-    tokio::spawn(async move {
-        FirebaseListener::new(config.hn_api_url.clone())
-            .unwrap()
-            .listen_to_updates(sender)
+
+    // TODO make this number less arbitrary
+    let n_update_workers = 32;
+    let update_orchestrator_handle = tokio::spawn(async move {
+        sync_service
+            .realtime_update(n_update_workers, receiver)
             .await
-    }); */
+            .expect("HN update consumer has failed!");
+    });
 
     /*
+    // let text: &str = "When I was a young boy, my father took me into the city to see a marching band";
     let embedder = E5Embedder::new(&config.triton_server_addr)
         .await
         .expect("Cannot connect to Triton!");
@@ -87,4 +98,20 @@ async fn main() {
         .serve(app.into_make_service())
         .await
         .unwrap(); */
+    let mut sigterm = signal(SignalKind::terminate()).expect("Failed to register SIGTERM handler");
+    let mut sigint = signal(SignalKind::interrupt()).expect("Failed to register SIGINT handler");
+
+    tokio::select! {
+        _ = sigterm.recv() => {
+            info!("SIGTERM received, shutting down.");
+        }
+        _ = sigint.recv() => {
+            info!("SIGINT received, shutting down.");
+        }
+    }
+    // Trigger the shutdown
+    shutdown_token.cancel();
+    // Wait for all tasks to complete
+    hn_updates_handle.await.unwrap();
+    update_orchestrator_handle.await.unwrap();
 }

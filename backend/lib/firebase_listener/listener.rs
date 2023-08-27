@@ -1,11 +1,12 @@
 use firebase_rs::Firebase;
+use flume::{SendError, Sender};
 use futures_util::StreamExt;
-use log::debug;
+use log::{debug, error, info, warn};
 use reqwest;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self};
 use thiserror::Error;
-use tokio::sync::mpsc::{error::SendError, Sender};
+use tokio_util::sync::CancellationToken;
 
 pub struct FirebaseListener {
     /// TODO: Make this a connection pool if it becomes a bottleneck!
@@ -129,7 +130,11 @@ impl FirebaseListener {
         Ok(max_id)
     }
 
-    pub async fn listen_to_updates(&self, tx: Sender<i64>) -> Result<(), FirebaseListenerErr> {
+    pub async fn listen_to_updates(
+        &self,
+        tx: Sender<i64>,
+        cancel_token: CancellationToken,
+    ) -> Result<(), FirebaseListenerErr> {
         let mut stream = self
             .firebase
             .at("updates")
@@ -140,26 +145,41 @@ impl FirebaseListener {
             )))? // Handle connection error
             .stream(true);
 
-        while let Some(event) = stream.next().await {
-            match event {
-                Ok((event_type, maybe_data)) => match maybe_data {
-                    Some(s) => match serde_json::from_str::<Update>(&s) {
-                        Ok(update) => {
-                            debug!("{:?} {:?}", event_type, update.data);
-                            if let Some(ids) = update.data.items {
-                                for id in ids {
-                                    tx.send(id).await?;
+        loop {
+            tokio::select! {
+                event_option = stream.next() => {
+                    if let Some(event) = event_option {
+                        match event {
+                            Ok((event_type, maybe_data)) => match maybe_data {
+                                Some(s) => match serde_json::from_str::<Update>(&s) {
+                                Ok(update) => {
+                                    if let Some(ids) = update.data.items {
+                                        info!("{:?}; {:?} new items", event_type, ids.len());
+                                        debug!("{:?}", ids);
+                                        for id in ids {
+                                            tx.send_async(id).await?;
+                                        }
+                                    }
                                 }
+                                Err(err) => {
+                                    error!("Error parsing JSON for event {:?}: {:?}", event_type, err);
+                                }
+                                },
+                                None => warn!("{:?} {:?}", event_type, maybe_data)
+                            }
+                            Err(err) => {
+                                error!("Error {:?}", err);
                             }
                         }
-                        Err(err) => {
-                            // Handle JSON parsing error
-                            println!("Error parsing JSON for event {:?}: {:?}", event_type, err);
-                        }
-                    },
-                    None => println!("{:?} {:?}", event_type, maybe_data),
-                },
-                Err(err) => println!("{:?}", err),
+                    } else {
+                        // Stream ended
+                        break;
+                    }
+                }
+                _ = cancel_token.cancelled() => {
+                    info!("Cancellation token triggered, exiting listen_to_updates.");
+                    break;
+                }
             }
         }
         Ok(())

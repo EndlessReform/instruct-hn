@@ -5,7 +5,7 @@ use reqwest;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self};
 use thiserror::Error;
-use tokio::sync::mpsc;
+use tokio::sync::mpsc::{error::SendError, Sender};
 
 pub struct FirebaseListener {
     /// TODO: Make this a connection pool if it becomes a bottleneck!
@@ -59,6 +59,7 @@ pub enum FirebaseListenerErr {
     ConnectError(String),
     ParseError(String),
     JsonParseError(#[from] serde_json::Error), // Added for JSON parsing errors
+    ChannelError(#[from] SendError<i64>),
 }
 
 impl fmt::Display for FirebaseListenerErr {
@@ -67,6 +68,7 @@ impl fmt::Display for FirebaseListenerErr {
             FirebaseListenerErr::ConnectError(e) => write!(f, "ConnectError: {}", e),
             FirebaseListenerErr::ParseError(e) => write!(f, "ParseError: {}", e),
             FirebaseListenerErr::JsonParseError(e) => write!(f, "ParseError: {}", e),
+            FirebaseListenerErr::ChannelError(e) => write!(f, "ChannelError: {}", e),
         }
     }
 }
@@ -127,10 +129,7 @@ impl FirebaseListener {
         Ok(max_id)
     }
 
-    pub async fn listen_to_updates(
-        &self,
-        sender: mpsc::Sender<UpdateData>,
-    ) -> Result<(), FirebaseListenerErr> {
+    pub async fn listen_to_updates(&self, tx: Sender<i64>) -> Result<(), FirebaseListenerErr> {
         let mut stream = self
             .firebase
             .at("updates")
@@ -147,9 +146,11 @@ impl FirebaseListener {
                     Some(s) => match serde_json::from_str::<Update>(&s) {
                         Ok(update) => {
                             debug!("{:?} {:?}", event_type, update.data);
-                            if let Err(err) = sender.send(update.data).await {
-                                println!("Error sending update data: {:?}", err);
-                            };
+                            if let Some(ids) = update.data.items {
+                                for id in ids {
+                                    tx.send(id).await?;
+                                }
+                            }
                         }
                         Err(err) => {
                             // Handle JSON parsing error

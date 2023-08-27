@@ -1,5 +1,6 @@
 use diesel::dsl::max;
 use diesel::insert_into;
+use diesel::pg::upsert::excluded;
 use diesel::prelude::*;
 use diesel::result::Error as DieselError;
 use diesel_async::pooled_connection::deadpool::Pool;
@@ -11,7 +12,8 @@ use thiserror::Error;
 use tokio::task::spawn;
 
 use crate::db::models;
-use crate::db::schema::items::dsl::*;
+use crate::db::schema::items;
+use crate::db::schema::kids;
 use crate::firebase_listener::{FirebaseListener, FirebaseListenerErr};
 
 #[derive(Error, Debug)]
@@ -74,9 +76,19 @@ impl SyncService {
         }
     }
 
-    pub async fn fetch_all_data(&self, n_additional: Option<i64>) -> Result<(), Error> {
+    /**
+    `catchup` pulls all items from HN after the latest in the DB.
+
+    Assumes no gaps in DB before its max ID
+    */
+    pub async fn catchup(
+        &self,
+        n_additional: Option<i64>,
+        n_start: Option<i64>,
+    ) -> Result<(), Error> {
         let fb = FirebaseListener::new(self.firebase_url.clone())?;
         let max_fb_id = fb.get_max_id().await?;
+        info!("Current max item on HN: {}", max_fb_id);
 
         let mut conn = self
             .db_pool
@@ -84,25 +96,32 @@ impl SyncService {
             .await
             .map_err(|_| Error::ConnectError("Listener could not access db pool!".into()))?;
 
-        let max_db_item: Option<i64> = items.select(max(id)).first(&mut conn).await?;
+        let max_db_item: Option<i64> = items::dsl::items
+            .select(max(items::dsl::id))
+            .first(&mut conn)
+            .await?;
         let max_db_item = max_db_item.ok_or(Error::ConnectError(
             "Cannot find max DB item in Postgres!".into(),
         ))?;
+        let min_id = match n_start {
+            Some(n) => n,
+            None => max_db_item,
+        };
+        let max_id = match n_additional {
+            Some(n) => min_id + n,
+            None => max_fb_id,
+        };
         info!("Current max item in db: {:?}", max_db_item);
-        let id_ranges = self.divide_ranges(
-            max_db_item,
-            match n_additional {
-                Some(n) => max_db_item + n,
-                None => max_fb_id,
-            },
-        );
+        let id_ranges = self.divide_ranges(min_id, max_id);
         info!("Items to download: {}", max_fb_id - max_db_item);
+        info!("Ranges: {:?}", &id_ranges);
 
         let mut handles = Vec::new();
         for range in id_ranges.into_iter() {
             let db_pool = self.db_pool.clone();
             let fb_url = self.firebase_url.clone();
-            let handle = spawn(async move { worker(&fb_url, range.0, range.1, db_pool).await });
+            let handle =
+                spawn(async move { catchup_worker(&fb_url, range.0, range.1, db_pool).await });
             handles.push(handle);
         }
 
@@ -126,9 +145,11 @@ impl SyncService {
     pub async fn realtime_update(&self) -> Result<(), Error> {
         Ok(())
     }
+
+    // possibly the wrong place to put this lmao
 }
 
-pub async fn worker(
+async fn catchup_worker(
     firebase_url: &str,
     min_id: i64,
     max_id: i64,
@@ -139,20 +160,56 @@ pub async fn worker(
     let fb = FirebaseListener::new(firebase_url.to_string())
         .map_err(|_| Error::ConnectError("HALP".into()))?;
 
-    let mut batch: Vec<models::Item> = Vec::new();
+    let mut items_batch: Vec<models::Item> = Vec::new();
+    let mut kids_batch: Vec<models::Kid> = Vec::new();
+
     for i in min_id..=max_id {
         let raw_item = fb.get_item(i).await?;
+        if let Some(kids) = &raw_item.kids {
+            for (idx, kid) in kids.iter().enumerate() {
+                kids_batch.push(models::Kid {
+                    item: *&raw_item.id,
+                    kid: *kid,
+                    display_order: Some(idx as i64),
+                })
+            }
+        }
         let item = Into::<models::Item>::into(raw_item);
-        batch.push(item);
+        items_batch.push(item);
 
-        if batch.len() == FLUSH_INTERVAL || i == max_id {
-            debug!("Pushing {} to {}", (i - batch.len() as i64), i);
-            insert_into(items)
-                .values(&batch)
-                .on_conflict_do_nothing()
+        if items_batch.len() == FLUSH_INTERVAL || i == max_id {
+            info!("Pushing {} to {}", (i - items_batch.len() as i64), i);
+            insert_into(items::dsl::items)
+                .values(&items_batch)
+                .on_conflict(items::id)
+                .do_update()
+                .set((
+                    items::deleted.eq(excluded(items::deleted)),
+                    items::type_.eq(excluded(items::type_)),
+                    items::by.eq(excluded(items::by)),
+                    items::time.eq(excluded(items::time)),
+                    items::text.eq(excluded(items::text)),
+                    items::dead.eq(excluded(items::dead)),
+                    items::parent.eq(excluded(items::parent)),
+                    items::poll.eq(excluded(items::poll)),
+                    items::url.eq(excluded(items::url)),
+                    items::score.eq(excluded(items::score)),
+                    items::title.eq(excluded(items::title)),
+                    items::parts.eq(excluded(items::parts)),
+                    items::descendants.eq(excluded(items::descendants)),
+                ))
                 .execute(&mut conn)
                 .await?;
-            batch.clear();
+            items_batch.clear();
+
+            insert_into(kids::dsl::kids)
+                .values(&kids_batch)
+                .on_conflict((kids::item, kids::kid))
+                .do_update()
+                .set(kids::display_order.eq(excluded(kids::display_order)))
+                .execute(&mut conn)
+                .await?;
+            kids_batch.clear();
         }
     }
     Ok(())

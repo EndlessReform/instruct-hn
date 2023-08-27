@@ -12,8 +12,6 @@ use diesel_async::pooled_connection::deadpool::Pool;
 use diesel_async::pooled_connection::AsyncDieselConnectionManager;
 use diesel_async::RunQueryDsl;
 use dotenv::dotenv;
-use firebase_rs::Firebase;
-use futures_util::StreamExt;
 use log::{debug, info};
 
 #[derive(Parser, Debug)]
@@ -30,8 +28,6 @@ struct Cli {
 
 #[tokio::main]
 async fn main() {
-    use self::db::schema::items::dsl::*;
-
     info!("Starting embedding backend");
     dotenv().ok();
 
@@ -40,8 +36,6 @@ async fn main() {
     // let args = Cli::parse();
     debug!("Config loaded");
 
-    let fb = FirebaseListener::new(config.hn_api_url.clone()).unwrap();
-    println!("{:?}", fb.get_max_id().await);
     let pool_config =
         AsyncDieselConnectionManager::<diesel_async::AsyncPgConnection>::new(&config.db_url);
     let pool = Pool::builder(pool_config)
@@ -53,7 +47,7 @@ async fn main() {
 
     let start_time = Instant::now();
     sync_service
-        .fetch_all_data(None)
+        .catchup(None, None)
         .await
         .expect("Catchup failed");
     let elapsed_time = start_time.elapsed();

@@ -1,4 +1,4 @@
-//use axum::{routing::get, Router};
+use axum::{routing::get, Router};
 use backend_lib::{config::Config, firebase_listener::FirebaseListener, sync_service::SyncService};
 use flume;
 use std::time::Instant;
@@ -29,6 +29,11 @@ struct Cli {
     #[clap(long)]
     /// Max number of records to catch up
     catchup_amt: Option<i64>,
+}
+
+// Health endpoint handler
+async fn health_handler() -> String {
+    "Healthy".to_string()
 }
 
 #[tokio::main]
@@ -91,13 +96,17 @@ async fn main() {
     debug!("Embedder initialized");
     let embedding = embedder.encode(text).await.expect("Embedding failed!");
     println!("{:?}", embedding); */
-    /*
-    let app = Router::new().route("/", get(|| async { "Hello, world!" }));
 
-    axum::Server::bind(&"0.0.0.0:3000".parse().unwrap())
-        .serve(app.into_make_service())
-        .await
-        .unwrap(); */
+    let app = Router::new()
+        .route("/", get(|| async { "Hello, world!" }))
+        .route("/health", get(health_handler));
+    let server_handle = tokio::spawn(async move {
+        axum::Server::bind(&"0.0.0.0:3000".parse().unwrap())
+            .serve(app.into_make_service())
+            .await
+            .unwrap();
+    });
+
     let mut sigterm = signal(SignalKind::terminate()).expect("Failed to register SIGTERM handler");
     let mut sigint = signal(SignalKind::interrupt()).expect("Failed to register SIGINT handler");
 
@@ -109,9 +118,11 @@ async fn main() {
             info!("SIGINT received, shutting down.");
         }
     }
+
     // Trigger the shutdown
     shutdown_token.cancel();
     // Wait for all tasks to complete
     hn_updates_handle.await.unwrap();
     update_orchestrator_handle.await.unwrap();
+    server_handle.abort();
 }

@@ -1,7 +1,7 @@
-use firebase_rs::Firebase;
+use eventsource_client::{Client, ClientBuilder, SSE};
 use flume::{SendError, Sender};
 use futures_util::StreamExt;
-use log::{debug, error, info, warn};
+use log::{debug, error, info};
 use reqwest;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self};
@@ -10,7 +10,6 @@ use tokio_util::sync::CancellationToken;
 
 pub struct FirebaseListener {
     /// TODO: Make this a connection pool if it becomes a bottleneck!
-    firebase: Firebase,
     client: reqwest::Client,
     base_url: String,
 }
@@ -61,6 +60,7 @@ pub enum FirebaseListenerErr {
     ParseError(String),
     JsonParseError(#[from] serde_json::Error), // Added for JSON parsing errors
     ChannelError(#[from] SendError<i64>),
+    RequestError(#[from] reqwest::Error),
 }
 
 impl fmt::Display for FirebaseListenerErr {
@@ -70,18 +70,15 @@ impl fmt::Display for FirebaseListenerErr {
             FirebaseListenerErr::ParseError(e) => write!(f, "ParseError: {}", e),
             FirebaseListenerErr::JsonParseError(e) => write!(f, "ParseError: {}", e),
             FirebaseListenerErr::ChannelError(e) => write!(f, "ChannelError: {}", e),
+            FirebaseListenerErr::RequestError(e) => write!(f, "RequestError: {}", e),
         }
     }
 }
 
 impl FirebaseListener {
     pub fn new(url: String) -> Result<Self, FirebaseListenerErr> {
-        let firebase = Firebase::new(&url).map_err(|_| {
-            FirebaseListenerErr::ConnectError(format!("Could not connect to URL {}", url))
-        })?;
         let client = reqwest::Client::new();
         Ok(Self {
-            firebase,
             client,
             base_url: url.to_string(),
         })
@@ -89,9 +86,7 @@ impl FirebaseListener {
 
     pub async fn get_item(&self, item_id: i64) -> Result<Item, FirebaseListenerErr> {
         let url = format!("{}/item/{}.json", self.base_url, item_id);
-        let response = self.client.get(&url).send().await.map_err(|_| {
-            FirebaseListenerErr::ConnectError(format!("Could not connect to {}", url))
-        })?;
+        let response = self.client.get(&url).send().await?;
 
         if !response.status().is_success() {
             return Err(FirebaseListenerErr::ConnectError(format!(
@@ -107,26 +102,20 @@ impl FirebaseListener {
             .map_err(|_| FirebaseListenerErr::ParseError(format!("Item {} is not valid!", item_id)))
     }
 
-    pub async fn get_user(&self, username: &str) -> Result<User, FirebaseListenerErr> {
-        let item = self
-            .firebase
-            .at("user")
-            .at(username)
-            .get::<User>()
-            .await
-            .map_err(|_| {
-                FirebaseListenerErr::ParseError(format!("Could not parse user {}", username))
-            })?;
-        Ok(item)
-    }
-
     pub async fn get_max_id(&self) -> Result<i64, FirebaseListenerErr> {
-        let max_id = self
-            .firebase
-            .at("maxitem")
-            .get::<i64>()
-            .await
-            .map_err(|_| FirebaseListenerErr::ParseError("Invalid response for max item".into()))?;
+        let url = format!("{}/maxitem.json", self.base_url);
+        let response = self.client.get(&url).send().await?;
+        if !response.status().is_success() {
+            return Err(FirebaseListenerErr::ConnectError(format!(
+                "Received unexpected status code for maxid: {}",
+                response.status()
+            )));
+        }
+
+        let response_text = response.text().await?;
+        let max_id: i64 = response_text.parse().map_err(|_| {
+            FirebaseListenerErr::ParseError(format!("Could not parse ID {}", response_text))
+        })?;
         Ok(max_id)
     }
 
@@ -135,41 +124,40 @@ impl FirebaseListener {
         tx: Sender<i64>,
         cancel_token: CancellationToken,
     ) -> Result<(), FirebaseListenerErr> {
-        let mut stream = self
-            .firebase
-            .at("updates")
-            .with_realtime_events()
-            .ok_or(FirebaseListenerErr::ConnectError(format!(
-                "Could not connect to events for {}",
-                &self.base_url
-            )))? // Handle connection error
-            .stream(true);
+        let url = format!("{}/updates.json", self.base_url);
+        let client = ClientBuilder::for_url(&url).map_err(|_| {
+            FirebaseListenerErr::ConnectError("Could not connect to SSE client!".into())
+        })?;
 
+        let mut stream = client.build().stream();
         loop {
             tokio::select! {
                 event_option = stream.next() => {
                     if let Some(event) = event_option {
                         match event {
-                            Ok((event_type, maybe_data)) => match maybe_data {
-                                Some(s) => match serde_json::from_str::<Update>(&s) {
-                                Ok(update) => {
-                                    if let Some(ids) = update.data.items {
-                                        info!("{:?}; {:?} new items", event_type, ids.len());
-                                        debug!("{:?}", ids);
-                                        for id in ids {
-                                            tx.send_async(id).await?;
+                            Ok(SSE::Event(ev)) => {
+                                match serde_json::from_str::<Update>(&ev.data) {
+                                    Ok(update) => {
+                                        if let Some(ids) = update.data.items {
+                                            info!("{:?}; {:?} new items", ev.event_type, ids.len());
+                                            debug!("{:?}", ids);
+                                            for id in ids {
+                                                tx.send_async(id).await?;
+                                            }
                                         }
                                     }
+                                    Err(err) => {
+                                        if ev.event_type == "keep-alive" {
+                                            debug!("keep-alive")
+                                        }
+                                        error!("Error parsing JSON for event {:?}: {:?}", ev.event_type, err);
+                                    }
                                 }
-                                Err(err) => {
-                                    error!("Error parsing JSON for event {:?}: {:?}", event_type, err);
-                                }
-                                },
-                                None => warn!("{:?} {:?}", event_type, maybe_data)
-                            }
+                            },
                             Err(err) => {
                                 error!("Error {:?}", err);
-                            }
+                            },
+                            Ok(SSE::Comment(_)) => {},
                         }
                     } else {
                         // Stream ended

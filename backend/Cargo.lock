@@ -177,8 +177,7 @@ dependencies = [
  "diesel-async",
  "dotenv",
  "env_logger",
- "eventsource-client 0.11.0",
- "firebase-rs",
+ "eventsource-client",
  "flume",
  "futures",
  "futures-util",
@@ -751,21 +750,6 @@ dependencies = [
 
 [[package]]
 name = "eventsource-client"
-version = "0.10.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9146112ee3ce031aa5aebe3e049e10b1d353b9c7630cc6be488c2c62cc5d9c42"
-dependencies = [
- "futures",
- "hyper",
- "hyper-rustls",
- "hyper-timeout",
- "log",
- "pin-project",
- "tokio",
-]
-
-[[package]]
-name = "eventsource-client"
 version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3b91e5ec5c794bbec5f639620f0bafe421b6d27dec66ac1ce3fdb6f009db3a6c"
@@ -802,19 +786,6 @@ dependencies = [
  "libc",
  "redox_syscall 0.3.5",
  "windows-sys 0.48.0",
-]
-
-[[package]]
-name = "firebase-rs"
-version = "2.0.8"
-dependencies = [
- "eventsource-client 0.10.2",
- "futures-util",
- "itertools 0.10.5",
- "reqwest",
- "serde",
- "serde_json",
- "url",
 ]
 
 [[package]]

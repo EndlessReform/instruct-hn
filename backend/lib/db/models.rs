@@ -56,3 +56,11 @@ impl From<listener::Item> for Item {
         }
     }
 }
+
+#[derive(Queryable, Insertable, AsChangeset)]
+#[diesel(table_name = super::schema::kids)]
+pub struct Kid {
+    pub item: i64,
+    pub kid: i64,
+    pub display_order: Option<i64>,
+}

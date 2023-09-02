@@ -27,8 +27,14 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Appease Docker's moronic repo name restriction
+        run: |
+          echo "OWNER_LC=${OWNER,,}" >>${GITHUB_ENV}
+        env:
+          OWNER: '${{ github.repository_owner }}'
+
       - name: Build Docker image
-        run: docker build -t ghcr.io/${{ github.repository }}/backend:${{ github.sha }} ./backend
+        run: docker build -t ghcr.io/${{ env.OWNER_LC }}/backend:${{ github.sha }} ./backend
 
       - name: Push Docker image to GitHub Packages
-        run: docker push ghcr.io/${{ github.repository }}/backend:${{ github.sha }}
+        run: docker push ghcr.io/${{ env.OWNER_LC  }}/backend:${{ github.sha }}

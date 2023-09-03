@@ -27,6 +27,9 @@ jobs:
             backend/target/
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+
       - name: Run tests
         working-directory: backend
         run: cargo test --verbose

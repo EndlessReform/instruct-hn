@@ -23,6 +23,7 @@ job "backend" {
       }
 
       service {
+        provider = "nomad"
         name = "backend-service"
         port = "http"
       }

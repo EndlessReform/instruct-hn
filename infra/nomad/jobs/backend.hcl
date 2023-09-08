@@ -11,8 +11,8 @@ job "backend" {
       mode = "bridge"
 
       port "http" {
-        static = 8080
-        to     = 80
+        static = 3000  # Host port; matches the port exposed by the Docker container
+        to     = 3000  # Container port; matches the port exposed by the Docker container
       }
     }
 
@@ -20,18 +20,15 @@ job "backend" {
       driver = "docker"
 
       config {
-        # Moving to canary until i set up blue-green (if need be)
         image = "ghcr.io/endlessreform/backend:canary"
-
-        port_map {
-          http = 80
-        }
+        
+        ports = ["http"]  # This should align with the 'port' label above
       }
 
       service {
         provider = "nomad"
-        name = "backend-service"
-        port = "http"
+        name     = "backend-service"
+        port     = "http"
       }
     }
   }

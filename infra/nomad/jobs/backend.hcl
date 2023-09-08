@@ -2,6 +2,11 @@ job "backend" {
   datacenters = ["dc1"]
 
   group "backend-group" {
+    constraint {
+      attribute = "${attr.cpu.arch}"
+      value     = "amd64" # Constraining to x86 since backend likes CPU
+    }
+
     network {
       mode = "bridge"
 

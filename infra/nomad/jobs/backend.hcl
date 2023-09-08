@@ -20,6 +20,7 @@ job "backend" {
       driver = "docker"
 
       config {
+        # Moving to canary until i set up blue-green (if need be)
         image = "ghcr.io/endlessreform/backend:canary"
 
         port_map {

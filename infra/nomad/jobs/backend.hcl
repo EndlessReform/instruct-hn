@@ -15,7 +15,7 @@ job "backend" {
       driver = "docker"
 
       config {
-        image = "ghcr.io/endlessreform/backend:latest"
+        image = "ghcr.io/endlessreform/backend:canary"
 
         port_map {
           http = 80

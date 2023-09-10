@@ -30,6 +30,12 @@ job "backend" {
         name     = "backend-service"
         port     = "http"
       }
+
+      env {
+        HN_API_URL="${var.hn_api_url}"
+        TRITON_SERVER_ADDR="${var.triton_server_addr}"
+        DB_URL="${var.db_url}"
+      }
     }
   }
 }

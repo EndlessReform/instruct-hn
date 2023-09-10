@@ -1,3 +1,15 @@
+variable "hn_api_url" {
+  type = string
+}
+
+variable "triton_server_addr" {
+  type = string
+}
+
+variable "db_url" {
+  type = string
+}
+
 job "backend" {
   datacenters = ["dc1"]
 

@@ -44,3 +44,37 @@ jobs:
           tags: ghcr.io/${{ env.OWNER_LC }}/backend:canary
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  deploy-image:
+    runs-on: ubuntu-latest
+
+    needs: release-image
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Login to Tailscale
+        uses: tailscale/github-action@v2
+        with:
+          oauth-client-id: ${{ secrets.TAILSCALE_ID }}
+          oauth-secret: ${{ secrets.TAILSCALE_CLIENT_SECRET }}
+          tags: tag:gha
+
+      - name: Install Nomad
+        run: |
+          wget -O- https://apt.releases.hashicorp.com/gpg | sudo gpg --dearmor -o /usr/share/keyrings/hashicorp-archive-keyring.gpg
+          echo "deb [signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/hashicorp.list
+          sudo apt update && sudo apt install nomad
+
+      - name: Update HCL with latest SHA
+        run: |
+          sed -i 's/canary/${{ github.sha }}/g' infra/nomad/jobs/backend.hcl
+
+      - name: Validate Nomad Job
+        run: nomad job validate infra/nomad/jobs/backend.hcl
+
+      - name: Submit Nomad Job
+        run: |
+          export NOMAD_ADDR="http://<your_server_ip>:4646"
+          nomad job run infra/nomad/jobs/backend.hcl

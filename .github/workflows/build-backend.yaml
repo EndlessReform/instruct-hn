@@ -76,5 +76,5 @@ jobs:
 
       - name: Submit Nomad Job
         run: |
-          export NOMAD_ADDR="http://<your_server_ip>:4646"
+          export NOMAD_ADDR="${{ vars.NOMAD_SERVER_IP }}"
           nomad job run infra/nomad/jobs/backend.hcl

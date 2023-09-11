@@ -7,7 +7,7 @@ on:
     branches:
       - main
     paths:
-      - 'backend/**'
+      - "backend/**"
 
 env:
   CARGO_TERM_COLOR: always
@@ -22,7 +22,7 @@ jobs:
 
       - name: Setup Docker Buildx
         uses: docker/setup-buildx-action@v2
-      
+
       - name: Login to GitHub Packages
         uses: docker/login-action@v2
         with:
@@ -34,8 +34,8 @@ jobs:
         run: |
           echo "OWNER_LC=${OWNER,,}" >>${GITHUB_ENV}
         env:
-          OWNER: '${{ github.repository_owner }}'
-      
+          OWNER: "${{ github.repository_owner }}"
+
       - name: Build and push Docker image
         uses: docker/build-push-action@v4
         with:
@@ -44,3 +44,45 @@ jobs:
           tags: ghcr.io/${{ env.OWNER_LC }}/backend:${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  deploy-image:
+    runs-on: ubuntu-latest
+
+    needs: release-image
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Login to Tailscale
+        uses: tailscale/github-action@v2
+        with:
+          oauth-client-id: ${{ secrets.TAILSCALE_ID }}
+          oauth-secret: ${{ secrets.TAILSCALE_CLIENT_SECRET }}
+          tags: tag:gha
+
+      - name: Install Nomad
+        run: |
+          wget -O- https://apt.releases.hashicorp.com/gpg | sudo gpg --dearmor -o /usr/share/keyrings/hashicorp-archive-keyring.gpg
+          echo "deb [signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/hashicorp.list
+          sudo apt update && sudo apt install nomad
+
+      - name: Update HCL with latest SHA
+        run: |
+          sed -i 's/canary/${{ github.sha }}/g' infra/nomad/jobs/backend.hcl
+
+      - name: Validate Nomad Job
+        run: nomad job validate infra/nomad/jobs/backend.hcl
+        env:
+          NOMAD_VAR_hn_api_url: ${{ vars.HN_API_URL }}
+          NOMAD_VAR_triton_server_addr: ${{ vars.TRITON_SERVER_ADDR }}
+          NOMAD_VAR_db_url: ${{ secrets.DB_URL }}
+
+      - name: Submit Nomad Job
+        run: |
+          export NOMAD_ADDR="${{ vars.NOMAD_SERVER_IP }}"
+          nomad job run infra/nomad/jobs/backend.hcl
+        env:
+          NOMAD_VAR_hn_api_url: ${{ vars.HN_API_URL }}
+          NOMAD_VAR_triton_server_addr: ${{ vars.TRITON_SERVER_ADDR }}
+          NOMAD_VAR_db_url: ${{ secrets.DB_URL }}

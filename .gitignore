@@ -4,6 +4,7 @@ __pycache__
 
 # Secrets
 .env
+**/*.vars
 
 # Generated files
 target

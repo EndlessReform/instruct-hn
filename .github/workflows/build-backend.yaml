@@ -73,8 +73,16 @@ jobs:
 
       - name: Validate Nomad Job
         run: nomad job validate infra/nomad/jobs/backend.hcl
+        env:
+          NOMAD_VAR_hn_api_url: ${{ vars.HN_API_URL }}
+          NOMAD_VAR_triton_server_addr: ${{ vars.TRITON_SERVER_ADDR }}
+          NOMAD_VAR_db_url: ${{ secrets.DB_URL }}
 
       - name: Submit Nomad Job
         run: |
           export NOMAD_ADDR="${{ vars.NOMAD_SERVER_IP }}"
           nomad job run infra/nomad/jobs/backend.hcl
+        env:
+          NOMAD_VAR_hn_api_url: ${{ vars.HN_API_URL }}
+          NOMAD_VAR_triton_server_addr: ${{ vars.TRITON_SERVER_ADDR }}
+          NOMAD_VAR_db_url: ${{ secrets.DB_URL }}
